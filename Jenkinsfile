@@ -61,6 +61,13 @@ pipeline {
                 '''
             }
         }
-      
+        stage('Deploy to Docker Swarm'){
+             steps{
+                 sh '''
+                  docker service update --image $DOCKER_USER/$IMAGE_NAME:$IMAGE_TAG bookstore
+                  docker service create --name bookstore --replicas 3 -p 8022:8080 $DOCKER_USER/$IMAGE_NAME:$IMAGE_TAG
+                   '''
+                }
+             }
     }
 }
