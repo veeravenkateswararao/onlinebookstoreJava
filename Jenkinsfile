@@ -1,43 +1,58 @@
 pipeline {
     agent any
+
     environment{
-         IMAGE_NAME = "javabook"
-         IMAGE_TAG = "v1"
-         DOCKER_USER = "venkyveera"
+        IMAGE_NAME = "javabook"
+        IMAGE_TAG = "v1"
+        DOCKER_USER = "venkyveera"
     }
+
     stages {
-        stage('get code from git') {
+
+        stage('Get Code from Git') {
             steps {
-               checkout scmGit(branches: [[name: '*/master']], extensions: [], userRemoteConfigs: [[credentialsId: 'venkygit', url: 'https://github.com/veeravenkateswararao/onlinebookstoreJava.git']])
+                checkout scmGit(
+                    branches: [[name: '*/master']],
+                    userRemoteConfigs: [[
+                        credentialsId: 'venkygit',
+                        url: 'https://github.com/veeravenkateswararao/onlinebookstoreJava.git'
+                    ]]
+                )
             }
         }
-         stage('validate') {
+
+        stage('Validate') {
             steps {
-               sh 'mvn validate'
+                sh 'mvn validate'
             }
         }
-       stage('compile') {
+
+        stage('Compile') {
             steps {
-               sh 'mvn compile'
+                sh 'mvn compile'
             }
         }
-           stage('test') {
+
+        stage('Test') {
             steps {
-               sh 'mvn test'
+                sh 'mvn test'
             }
         }
-       stage('package') {
+
+        stage('Package') {
             steps {
-               sh 'mvn package'
+                sh 'mvn package'
             }
         }
-        stage('docker build'){
-           steps{
-               sh 'docker build -t $DOCKER_USER/$IMAGE_NAME:$IMAGE_TAG .'
-           }
+
+        stage('Docker Build') {
+            steps {
+                sh 'docker build -t $DOCKER_USER/$IMAGE_NAME:$IMAGE_TAG .'
+            }
         }
-        stage('Docker Login'){
-            steps{
+
+        stage('Docker Login') {
+            steps {
                 withCredentials([usernamePassword(
                     credentialsId: 'Docker_CRED',
                     usernameVariable: 'DOCKER_USER',
@@ -47,27 +62,20 @@ pipeline {
                 }
             }
         }
-        stage('Docker push'){
-            steps{
-                 sh 'docker push $DOCKER_USER/$IMAGE_NAME:$IMAGE_TAG'
+
+        stage('Docker Push') {
+            steps {
+                sh 'docker push $DOCKER_USER/$IMAGE_NAME:$IMAGE_TAG'
             }
         }
-        stage('Docker deploy'){
-            steps{
+
+        stage('Deploy to Docker Swarm') {
+            steps {
                 sh '''
-                docker stop bookstore || true
-                docker rm bookstore || true
-                docker run -d -p 8022:8080 --name bookstore $DOCKER_USER/$IMAGE_NAME:$IMAGE_TAG
+                docker service update --image $DOCKER_USER/$IMAGE_NAME:$IMAGE_TAG bookstore || docker service create --name bookstore --replicas 3 -p 8022:8080 $DOCKER_USER/$IMAGE_NAME:$IMAGE_TAG
                 '''
             }
         }
-        stage('Deploy to Docker Swarm'){
-             steps{
-                 sh '''
-                  docker service update --image $DOCKER_USER/$IMAGE_NAME:$IMAGE_TAG bookstore
-                  docker service create --name bookstore --replicas 3 -p 8022:8080 $DOCKER_USER/$IMAGE_NAME:$IMAGE_TAG
-                   '''
-                }
-             }
+
     }
 }
