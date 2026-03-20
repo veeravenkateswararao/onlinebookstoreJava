@@ -1,81 +1,95 @@
 pipeline {
     agent any
 
-    environment{
+    environment {
+
+        GIT_REPO = "https://github.com/veeravenkateswararao/onlinebookstoreJava.git"
+        GIT_BRANCH = "master"
+
+        DOCKERHUB_USER = "venkyveera"
         IMAGE_NAME = "javabook"
-        IMAGE_TAG = "v1"
-        DOCKER_USER = "venkyveera"
+        IMAGE_TAG = "${BUILD_NUMBER}"
+
+        DOCKER_CREDS = "Docker_CRED"
+
+        AWS_REGION = "eu-north-1"
+        EKS_CLUSTER = "nareshcluster"
     }
 
     stages {
 
-        stage('Get Code from Git') {
+        stage('Checkout Code') {
             steps {
                 checkout scmGit(
-                    branches: [[name: '*/master']],
+                    branches: [[name: "*/${GIT_BRANCH}"]],
                     userRemoteConfigs: [[
                         credentialsId: 'venkygit',
-                        url: 'https://github.com/veeravenkateswararao/onlinebookstoreJava.git'
+                        url: "${GIT_REPO}"
                     ]]
                 )
             }
         }
 
-        stage('Validate') {
+        stage('Build Docker Image') {
             steps {
-                sh 'mvn validate'
+                sh """
+                docker build -t ${DOCKERHUB_USER}/${IMAGE_NAME}:${IMAGE_TAG} .
+                """
             }
         }
 
-        stage('Compile') {
-            steps {
-                sh 'mvn compile'
-            }
-        }
-
-        stage('Test') {
-            steps {
-                sh 'mvn test'
-            }
-        }
-
-        stage('Package') {
-            steps {
-                sh 'mvn package'
-            }
-        }
-
-        stage('Docker Build') {
-            steps {
-                sh 'docker build -t $DOCKER_USER/$IMAGE_NAME:$IMAGE_TAG .'
-            }
-        }
-
-        stage('Docker Login') {
+        stage('DockerHub Login') {
             steps {
                 withCredentials([usernamePassword(
-                    credentialsId: 'Docker_CRED',
+                    credentialsId: "${DOCKER_CREDS}",
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS'
                 )]) {
-                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+                    sh """
+                    echo \$DOCKER_PASS | docker login -u \$DOCKER_USER --password-stdin
+                    """
                 }
             }
         }
 
-        stage('Docker Push') {
+        stage('Push Image to DockerHub') {
             steps {
-                sh 'docker push $DOCKER_USER/$IMAGE_NAME:$IMAGE_TAG'
+                sh """
+                docker push ${DOCKERHUB_USER}/${IMAGE_NAME}:${IMAGE_TAG}
+                """
             }
         }
 
-        stage('Deploy to Docker Swarm') {
+        stage('Configure EKS Access') {
             steps {
-                sh '''
-                docker service update --image $DOCKER_USER/$IMAGE_NAME:$IMAGE_TAG bookstore || docker service create --name bookstore --replicas 3 -p 8022:8080 $DOCKER_USER/$IMAGE_NAME:$IMAGE_TAG
-                '''
+                sh """
+                aws eks --region ${AWS_REGION} update-kubeconfig --name ${EKS_CLUSTER}
+                kubectl get nodes
+                """
             }
         }
 
+        stage('Deploy to Kubernetes') {
+            steps {
+                sh """
+                kubectl apply -f k8s/deployment.yml
+                kubectl apply -f k8s/service.yml
+
+                kubectl set image deployment/bookstore-deploy \
+                bookstore-container=${DOCKERHUB_USER}/${IMAGE_NAME}:${IMAGE_TAG}
+
+                kubectl rollout status deployment/bookstore-deploy
+                """
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                sh """
+                kubectl get pods -o wide
+                kubectl get svc
+                """
+            }
+        }
     }
 }
